@@ -1,5 +1,5 @@
 [project]
-name = "pathetic"
+name = "pathetic-cli"
 version = "0.1.0"
 description = "A colorful CLI that visualizes system, environment, and PATH info with Rich."
 readme = "README.md"
@@ -10,5 +10,34 @@ dependencies = [
 ]
 license = { file = "LICENSE" }
 
+authors = [
+  { name = "Lance Reinsmith", email = "info@k2rad.com" }
+]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Environment :: Console",
+  "Topic :: System :: Systems Administration",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/lancereinsmith/pathetic"
+Repository = "https://github.com/lancereinsmith/pathetic"
+Issues = "https://github.com/lancereinsmith/pathetic/issues"
+
 [project.scripts]
 ptc = "pathetic:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["pathetic"]

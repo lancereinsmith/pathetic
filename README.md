@@ -10,7 +10,7 @@ A colorful, fast CLI to inspect your current environment: locations, system info
 
 ### Requirements
 
-- Python >= 3.14
+- Python >= 3.11
 
 ### Installation
 

@@ -1,9 +1,9 @@
 [project]
 name = "pathetic-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "A colorful CLI that visualizes system, environment, and PATH info with Rich."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "rich>=14.2.0",
     "click>=8.3.0",
@@ -34,6 +34,7 @@ Issues = "https://github.com/lancereinsmith/pathetic/issues"
 
 [project.scripts]
 ptc = "pathetic:main"
+pathetic = "pathetic:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

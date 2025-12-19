@@ -23,7 +23,7 @@ uv pip install -e .
 Or install globally with `uv tool`:
 
 ```bash
-uv tool install .
+uv tool install pathetic-cli
 ```
 
 This exposes the `ptc` command.

@@ -6,7 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- Edit to README.md
+
+## [0.2.1] - 2025-12-19
+
+### Fixed
+- Fixed test failures in CI environment related to UV environment variable detection
+- Fixed mypy type checking errors
+- Fixed CI workflow to use `uv sync` instead of `uv pip install`
+- Updated ruff configuration to use new `[tool.ruff.lint]` section structure
+
+### Changed
+- Updated dependency management to use PEP 735 dependency groups
+- Switched build backend from setuptools to hatchling for better dependency group support
 
 ## [0.2.0] - 2025-12-19
 

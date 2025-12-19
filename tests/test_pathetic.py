@@ -238,6 +238,8 @@ class TestPathSeparator:
 
     def test_path_separator_unix(self, monkeypatch):
         """Test PATH splitting on Unix-like systems."""
+        # Mock os.pathsep to be ':' for Unix-like behavior
+        monkeypatch.setattr(os, "pathsep", ":")
         monkeypatch.setenv("PATH", "/usr/bin:/usr/local/bin:/home/user/bin")
         parts = os.environ.get("PATH", "").split(os.pathsep)
         assert len(parts) == 3
@@ -245,17 +247,14 @@ class TestPathSeparator:
 
     def test_path_separator_windows(self, monkeypatch):
         """Test PATH splitting on Windows."""
+        # Mock os.pathsep to be ';' for Windows behavior
+        monkeypatch.setattr(os, "pathsep", ";")
         # Simulate Windows PATH
         windows_path = "C:\\Windows\\System32;C:\\Windows;C:\\Program Files"
         monkeypatch.setenv("PATH", windows_path)
-        # On Windows, os.pathsep is ';'
-        if os.pathsep == ";":
-            parts = windows_path.split(os.pathsep)
-            assert len(parts) == 3
-        else:
-            # On Unix, this would split differently, but we test the logic
-            parts = windows_path.split(os.pathsep)
-            assert isinstance(parts, list)
+        parts = os.environ.get("PATH", "").split(os.pathsep)
+        assert len(parts) == 3
+        assert "C:\\Windows\\System32" in parts
 
 
 class TestDirectoryTree:

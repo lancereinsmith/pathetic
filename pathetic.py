@@ -29,7 +29,7 @@ except ImportError:
 try:
     import yaml
 except ImportError:
-    yaml = None  # type: ignore[assignment]
+    yaml = None
 
 
 # Version from pyproject.toml (single source of truth)
@@ -48,7 +48,8 @@ def _get_version() -> str:
                 if tomllib:
                     with open(pyproject_path, "rb") as f:
                         data = tomllib.load(f)
-                        return data["project"]["version"]
+                        version: str = str(data.get("project", {}).get("version", ""))
+                        return version
                 else:
                     # Fallback: simple regex if tomllib not available
                     import re
@@ -797,7 +798,7 @@ def main(
         elif as_toml:
             # TOML export - note: complex nested structures may not convert perfectly
             try:
-                import tomli_w  # type: ignore[import-untyped]
+                import tomli_w
 
                 console.print(tomli_w.dumps(data))
             except ImportError:

@@ -154,6 +154,7 @@ class TestSections:
         panel = pathetic.section_git()
         # Should return None if not in git repo
         # This is expected behavior
+        assert panel is None
 
     def test_section_git_with_repo(self, mock_git_repo):
         """Test git section when in a git repo."""

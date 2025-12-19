@@ -180,6 +180,9 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_venv(self, monkeypatch):
         """Test detection of venv."""
+        # Clear UV vars to test venv in isolation
+        monkeypatch.delenv("UV_PYTHON", raising=False)
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("VIRTUAL_ENV", "/path/to/venv")
         result = pathetic.detect_virtual_environment()
         assert result["manager"] == "venv"
@@ -187,6 +190,9 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_conda(self, monkeypatch):
         """Test detection of conda."""
+        # Clear UV vars to test conda in isolation
+        monkeypatch.delenv("UV_PYTHON", raising=False)
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("CONDA_PREFIX", "/path/to/conda")
         result = pathetic.detect_virtual_environment()
         assert result["manager"] == "conda"
@@ -194,6 +200,9 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_poetry(self, monkeypatch):
         """Test detection of Poetry."""
+        # Clear UV vars to test poetry in isolation
+        monkeypatch.delenv("UV_PYTHON", raising=False)
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("POETRY_ACTIVE", "1")
         monkeypatch.setenv("POETRY_ENV", "/path/to/poetry")
         result = pathetic.detect_virtual_environment()
@@ -201,12 +210,18 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_pipenv(self, monkeypatch):
         """Test detection of Pipenv."""
+        # Clear UV vars to test pipenv in isolation
+        monkeypatch.delenv("UV_PYTHON", raising=False)
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("PIPENV_ACTIVE", "1")
         result = pathetic.detect_virtual_environment()
         assert result["manager"] == "pipenv"
 
     def test_detect_virtual_environment_pdm(self, monkeypatch):
         """Test detection of PDM."""
+        # Clear UV vars to test pdm in isolation
+        monkeypatch.delenv("UV_PYTHON", raising=False)
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("PDM_PROJECT_ROOT", "/path/to/pdm")
         result = pathetic.detect_virtual_environment()
         assert result["manager"] == "pdm"

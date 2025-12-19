@@ -149,12 +149,14 @@ class TestSections:
         assert panel is not None
         assert panel.title == "File System"
 
-    def test_section_git_no_repo(self):
+    @patch("pathetic.get_git_info", return_value=None)
+    def test_section_git_no_repo(self, mock_git_info):
         """Test git section when not in a git repo."""
         panel = pathetic.section_git()
         # Should return None if not in git repo
         # This is expected behavior
         assert panel is None
+        mock_git_info.assert_called_once()
 
     def test_section_git_with_repo(self, mock_git_repo):
         """Test git section when in a git repo."""

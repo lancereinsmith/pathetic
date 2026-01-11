@@ -3,7 +3,7 @@ name = "pathetic-cli"
 version = "0.2.1"
 description = "A colorful CLI that visualizes system, environment, and PATH info with Rich."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "rich>=14.2.0",
     "click>=8.3.1",
@@ -47,14 +47,14 @@ only-include = ["pathetic.py"]
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.14.10",
+    "ruff>=0.14.11",
     "mypy>=1.19.1",
     "pre-commit>=4.5.1",
 ]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -75,7 +75,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

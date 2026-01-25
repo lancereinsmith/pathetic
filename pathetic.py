@@ -257,9 +257,12 @@ def section_fs() -> Panel:
     Returns:
         A Rich Panel containing filesystem usage information, or an error message if unavailable.
     """
+    statvfs_fn = getattr(os, "statvfs", None)
+    if statvfs_fn is None:
+        return Panel("Unavailable", title="File System", border_style="red")
     try:
-        statvfs = os.statvfs(".")
-    except (OSError, AttributeError):
+        statvfs = statvfs_fn(".")
+    except OSError:
         return Panel("Unavailable", title="File System", border_style="red")
 
     def fmt(b: float) -> str:
@@ -576,20 +579,24 @@ def build_json_output(config: Config) -> dict[str, Any]:
 
     # File system
     if config.show_all or config.show_fs:
-        try:
-            statvfs = os.statvfs(".")
-            total = statvfs.f_frsize * statvfs.f_blocks
-            free = statvfs.f_frsize * statvfs.f_bavail
-            used = total - free
-            usage_percent = (used / total) * 100 if total else 0.0
-            data["filesystem"] = {
-                "total_bytes": total,
-                "free_bytes": free,
-                "used_bytes": used,
-                "usage_percent": round(usage_percent, 1),
-            }
-        except Exception:
+        statvfs_fn = getattr(os, "statvfs", None)
+        if statvfs_fn is None:
             data["filesystem"] = None
+        else:
+            try:
+                statvfs = statvfs_fn(".")
+                total = statvfs.f_frsize * statvfs.f_blocks
+                free = statvfs.f_frsize * statvfs.f_bavail
+                used = total - free
+                usage_percent = (used / total) * 100 if total else 0.0
+                data["filesystem"] = {
+                    "total_bytes": total,
+                    "free_bytes": free,
+                    "used_bytes": used,
+                    "usage_percent": round(usage_percent, 1),
+                }
+            except Exception:
+                data["filesystem"] = None
 
     # Git
     git_info = get_git_info()

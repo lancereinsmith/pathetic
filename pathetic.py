@@ -29,7 +29,7 @@ except ImportError:
 try:
     import yaml
 except ImportError:
-    yaml = None
+    yaml = None  # type: ignore[assignment]
 
 
 # Version from pyproject.toml (single source of truth)

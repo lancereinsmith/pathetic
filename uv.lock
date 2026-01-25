@@ -197,6 +197,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "rumdl" },
+    { name = "tomli-w" },
     { name = "ty" },
 ]
 
@@ -213,6 +214,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "rumdl", specifier = ">=0.0.220" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "ty", specifier = ">=0.0.12" },
 ]
 
@@ -387,6 +389,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/99/b5d47585814bf12ccf53ff9ec9643876890dcc0d6304cb3b22e62de83eb7/rumdl-0.1.0-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:2a0c3b80b585da4d511245276624b4fc78e6c61f64a246eee2dfca2a38531f34", size = 3397945, upload-time = "2026-01-23T20:25:20.525Z" },
     { url = "https://files.pythonhosted.org/packages/fb/5c/e032fe302a27a5ef29ac8cb3189a32c1fd946834a35f2699db8029cf93c5/rumdl-0.1.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:566596df1bea8da8bf552c0d3eb81c3c10fe12681a8282ec4a9e1970a2dbe0cc", size = 3444174, upload-time = "2026-01-23T20:25:26.69Z" },
     { url = "https://files.pythonhosted.org/packages/cf/69/bd4977d4e138d4715b7aa93ad6d6d216874298352fb6e7dfa504bdaab252/rumdl-0.1.0-py3-none-win_amd64.whl", hash = "sha256:ade6002a935ef03fa26ae31d1174c4b033019bb37add18487ee476486b0fc83d", size = 3253871, upload-time = "2026-01-23T20:25:23.227Z" },
+]
+
+[[package]]
+name = "tomli-w"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
 ]
 
 [[package]]

@@ -77,7 +77,9 @@ class TestCLI:
     def test_env_keys(self):
         """Test custom environment variable keys."""
         runner = CliRunner()
-        result = runner.invoke(pathetic.main, ["--env-key", "HOME", "--env-key", "USER"])
+        result = runner.invoke(
+            pathetic.main, ["--env-key", "HOME", "--env-key", "USER"]
+        )
         assert result.exit_code == 0
 
     def test_no_paths_flag(self):
@@ -267,7 +269,9 @@ class TestDirectoryTree:
         (tmp_path / "dir1").mkdir()
         (tmp_path / "dir1" / "file2.txt").touch()
 
-        tree = pathetic.get_directory_tree_json(str(tmp_path), max_depth=2, max_items=10)
+        tree = pathetic.get_directory_tree_json(
+            str(tmp_path), max_depth=2, max_items=10
+        )
         assert isinstance(tree, list)
         assert len(tree) > 0
 

@@ -320,7 +320,11 @@ def get_git_info(timeout: float = 5.0) -> dict[str, Any] | None:
             "commit": commit,
             "changes": len(status.splitlines()) if status else 0,
         }
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ):
         return None
 
 
@@ -405,10 +409,7 @@ def detect_virtual_environment() -> dict[str, str | None]:
 
     # Flag uv if we see hints
     if uv_python or uv_cache:
-        if manager is None:
-            manager = "uv"
-        else:
-            manager = f"{manager}+uv"
+        manager = "uv" if manager is None else f"{manager}+uv"
 
     return {
         "manager": manager,
@@ -485,7 +486,9 @@ def get_directory_tree(
             prefix = "└── " if is_last else "├── "
             tree.append("  " * current_depth + prefix + item.name)
             if item.is_dir() and current_depth < max_depth - 1:
-                tree.append(get_directory_tree(item, max_depth, max_items, current_depth + 1))
+                tree.append(
+                    get_directory_tree(item, max_depth, max_items, current_depth + 1)
+                )
     except PermissionError:
         tree.append("  " * current_depth + "└── [Permission Denied]")
     return "\n".join(tree)
@@ -562,9 +565,13 @@ def build_json_output(config: Config) -> dict[str, Any]:
         for g in config.env_groups:
             keys_from_groups.extend(ENV_GROUPS.get(g, []))
         selected_env_keys = list(
-            dict.fromkeys((keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"])
+            dict.fromkeys(
+                (keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"]
+            )
         )
-        env_map: dict[str, str | None] = {k: os.environ.get(k) for k in selected_env_keys}
+        env_map: dict[str, str | None] = {
+            k: os.environ.get(k) for k in selected_env_keys
+        }
         data["environment"] = env_map
 
     # File system
@@ -634,7 +641,9 @@ def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel
     if env_manager or env_location:
         sys_info.append("🧪 Environment: ", style="bold")
         details = (
-            f"{env_manager or 'unknown'} at {env_location}" if env_location else f"{env_manager}"
+            f"{env_manager or 'unknown'} at {env_location}"
+            if env_location
+            else f"{env_manager}"
         )
         sys_info.append(details + "\n", style="yellow")
     panels.append(Panel(sys_info, title="System", border_style="cyan", padding=(1, 2)))
@@ -657,7 +666,9 @@ def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel
         for g in config.env_groups:
             keys_from_groups.extend(ENV_GROUPS.get(g, []))
         selected_keys = list(
-            dict.fromkeys((keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"])
+            dict.fromkeys(
+                (keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"]
+            )
         )
         panels.append(section_env(keys=selected_keys))
     if config.show_all or config.show_fs:
@@ -674,7 +685,9 @@ def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel
 @click.option("--all", "show_all", is_flag=True, help="Show all sections")
 @click.option("--no-paths", is_flag=True, help="Hide PATH section")
 @click.option("--no-python-path", is_flag=True, help="Hide sys.path section")
-@click.option("--env", "show_env", is_flag=True, help="Show selected environment variables")
+@click.option(
+    "--env", "show_env", is_flag=True, help="Show selected environment variables"
+)
 @click.option("--fs", "show_fs", is_flag=True, help="Show file system stats")
 @click.option("--tree", "show_tree", is_flag=True, help="Show a small directory tree")
 @click.option(
@@ -684,8 +697,12 @@ def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel
     show_default=True,
     help="Max rows for PATH and sys.path",
 )
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON (machine-readable)")
-@click.option("--yaml", "as_yaml", is_flag=True, help="Output as YAML (requires pyyaml)")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Output as JSON (machine-readable)"
+)
+@click.option(
+    "--yaml", "as_yaml", is_flag=True, help="Output as YAML (requires pyyaml)"
+)
 @click.option("--toml", "as_toml", is_flag=True, help="Output as TOML (requires tomli)")
 @click.option(
     "--env-group",
@@ -754,7 +771,9 @@ def main(
     # Validate export format options
     export_formats = sum([as_json, as_yaml, as_toml])
     if export_formats > 1:
-        console.print("[red]Error: Only one export format can be specified at a time[/red]")
+        console.print(
+            "[red]Error: Only one export format can be specified at a time[/red]"
+        )
         sys.exit(1)
 
     if as_yaml and yaml is None:

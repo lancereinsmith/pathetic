@@ -7,21 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-25
+
+### Changed
+
+- Replaced mypy with ty for type checking
+- CI: use `uv sync` for dependency installation
+- Python 3.12 in configuration; CI workflow includes Python 3.14
+- Refactored code for improved readability and maintainability
+- Reorganized `pyproject.toml`: `[build-system]` first, `[project]` metadata consolidated, logical ordering of `[dependency-groups]` and `[tool.*]`
+
+### Fixed
+
+- `pyproject.toml`: moved `license`, `authors`, and `classifiers` into `[project]` (were incorrectly parsed under `[dependency-groups]`)
+- SIM108: use ternary for uv manager assignment in virtual environment detection
+
 ## [0.2.1] - 2025-12-19
 
 ### Fixed
+
 - Fixed test failures in CI environment related to UV environment variable detection
 - Fixed mypy type checking errors
 - Fixed CI workflow to use `uv sync` instead of `uv pip install`
 - Updated ruff configuration to use new `[tool.ruff.lint]` section structure
 
 ### Changed
+
 - Updated dependency management to use PEP 735 dependency groups
 - Switched build backend from setuptools to hatchling for better dependency group support
 
 ## [0.2.0] - 2025-12-19
 
 ### Added
+
 - Cross-platform PATH separator support (Windows compatibility)
 - Enhanced environment detection (Poetry, Pipenv, PDM)
 - PATH filtering (`--path-filter`) and exclusion (`--path-exclude`) options
@@ -38,18 +56,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better type hints and docstrings throughout
 
 ### Changed
+
 - Refactored `main()` function into smaller, testable components
 - Improved subprocess error handling with timeouts
 - Enhanced virtual environment detection logic
 - Version now read from `pyproject.toml` as single source of truth
 
 ### Fixed
+
 - PATH separator now uses `os.pathsep` for cross-platform compatibility
 - Better error messages when optional dependencies are missing
 
 ## [0.1.1] - Initial Release
 
 ### Added
+
 - Basic system information display
 - PATH and Python path visualization
 - Environment variable display

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"show_tree\\\\|tree_depth\\\\|tree_max_items\" /Users/lance/Maker/pathetic-cli --exclude-dir=.venv --exclude-dir=__pycache__ --exclude=*.pyc)",
+      "Bash(uv run:*)",
+      "Bash(ls ~/.iterm2*)",
+      "Bash(defaults read:*)",
+      "Read(//Applications/iTerm.app/Contents/Resources/**)"
+    ]
+  }
+}

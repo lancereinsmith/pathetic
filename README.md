@@ -1,18 +1,20 @@
-## pathetic
+# pathetic
 
-A colorful, fast CLI to inspect your current environment: locations, system info, PATH, Python paths, selected environment variables, filesystem usage, Git status, and a small directory tree. Built with Rich for delightful output and Click for a clean command-line UX.
+A colorful, fast CLI to inspect your current environment: locations, system info, PATH with source tracing, Python environment, grouped environment variables, filesystem usage, and Git status. Built with Rich for delightful output and Click for a clean command-line UX.
 
-### Highlights
+## Highlights
 
 - Visual, readable output with sensible defaults
-- Modular sections you can toggle on/off
-- Zero-config quick overview; add flags when you want more detail
+- Responsive columnar layout that adapts to terminal width
+- PATH entries traced back to their source file (.zshrc, /etc/paths, etc.)
+- Shows the user's active Python, not the tool's isolated environment
+- All environment variables grouped by category (Shell, Python, Git, Cloud, etc.)
 
-### Requirements
+## Requirements
 
 - Python >= 3.11
 
-### Installation
+## Installation
 
 Install locally (editable) while developing:
 
@@ -28,7 +30,7 @@ uv tool install pathetic-cli
 
 This exposes the `ptc` command.
 
-### Quickstart
+## Quickstart
 
 Run the default, concise snapshot:
 
@@ -48,60 +50,50 @@ Machine-readable output:
 ptc --json --all > snapshot.json
 ```
 
-Increase list sizes for PATH and sys.path:
-
-```bash
-ptc --all --limit 25
-```
-
 Focused views:
 
 ```bash
-ptc --env        # Selected environment variables
-ptc --fs         # File system stats
-ptc --tree       # Small directory tree (depth 2)
-ptc --env-group python --env-key FOO --env-key BAR  # Custom env selection
+ptc --env                              # All env vars, grouped by category
+ptc --fs                               # File system stats
+ptc --env-key HOME --env-key EDITOR    # Specific env vars only
+ptc --all --limit 50                   # More PATH/sys.path rows
 ```
 
-### CLI Options
+## CLI Options
 
-```bash
+```text
 ptc [OPTIONS]
 
 Options:
-  -h, --help              Show this message and exit
-  --all                   Show all sections
-  --no-paths              Hide PATH section
-  --no-python-path        Hide sys.path section
-  --env                   Show selected environment variables
-  --fs                    Show file system stats
-  --tree                  Show a small directory tree
-  --limit INTEGER         Max rows for PATH and sys.path (default: 10)
-  --json                  Output as JSON (machine-readable)
-  --env-group [ci|common|python]
-                          Predefined env var groups (repeatable)
-  --env-key TEXT          Additional environment variable keys (repeatable)
+  -h, --help         Show this message and exit
+  --version          Show version
+  --all              Show all sections
+  --env              Show environment variables (grouped)
+  --fs               Show file system stats
+  --limit INTEGER    Max rows for PATH and sys.path (default: 25)
+  --json             Output as JSON (machine-readable)
+  --env-key TEXT     Show specific env vars (repeatable)
 ```
 
-### What the tool shows
+## What the tool shows
 
-- Location: Current working directory and home directory
-- System: Platform, Python version/implementation, architecture, executable
-- Environment detection: Active virtualenv/conda/uv info shown prominently
-- PATH: First N entries (configurable with `--limit`)
-- Python Path: First N entries of `sys.path` (shown with `--all`)
-- Environment: Selected high-signal variables (`--env` to show)
-- File System: Total, free, used, and usage percent (`--fs`)
-- Git: Branch, short commit, working state (auto-detected when in a repo)
-- Tree: Small directory tree of the current directory (`--tree`)
+- **Location**: Current working directory and home directory
+- **System**: Platform, user's active Python version, architecture, executable
+- **Environment detection**: Active virtualenv/conda/uv info shown prominently
+- **PATH**: First N entries with source file origin and executable count (configurable with `--limit`)
+- **Python Path**: First N entries of `sys.path` (shown with `--all`)
+- **Environment**: All variables grouped by category (`--env` or `--all`)
+- **File System**: Total, free, used, and usage percent (`--fs` or `--all`)
+- **Git**: Branch, short commit, working state (auto-detected when in a repo)
 
-### Design philosophy
+## Design philosophy
 
 - Defaults show the most useful, actionable info quickly
 - Additional details are opt-in via flags
-- Clean typography and layout with Rich
+- Clean typography and responsive layout with Rich
+- PATH source tracing helps debug environment issues
 
-### Development
+## Development
 
 Install dev dependencies and run locally:
 
@@ -117,21 +109,11 @@ Project entry point is defined in `pyproject.toml`:
 ptc = "pathetic:main"
 ```
 
-Source code: `pathetic.py` uses small, focused rendering functions for each section and a Click command to wire options:
-
-- `section_cwd_home()`
-- `section_system()`
-- `section_paths()`
-- `section_python_path()`
-- `section_env()`
-- `section_fs()`
-- `section_git()`
-
-### Troubleshooting
+## Troubleshooting
 
 - Command not found after install: ensure your Python user base or pipx bin directory is on PATH.
 - Missing colors or odd glyphs: use a modern terminal with UTF-8 and TrueColor support.
 
-### License
+## License
 
 MIT. See `LICENSE`.

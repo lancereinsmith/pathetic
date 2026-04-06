@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-06
+
+### Added
+
+- PATH source tracing: each PATH entry shows which config file set it (.zshrc, /etc/paths, etc.)
+- PATH executable count: shows how many commands are in each directory, or `missing` if it doesn't exist
+- Follows sourced files (e.g., `~/.cargo/env` from `~/.zshenv`) to trace PATH origins
+- Runtime source detection for venv activation, VS Code, and iTerm.app injected paths
+- User's active Python detection: shows the Python on the user's PATH, not the tool's isolated environment
+- Grouped environment variables: `--env` shows ALL env vars categorized by type (Shell, Python, Git, Cloud, Docker, CI/CD, etc.)
+- Responsive columnar layout: compact panels arrange side-by-side on wide terminals
+
+### Changed
+
+- Simplified CLI options from 13 down to 6: `--all`, `--env`, `--fs`, `--json`, `--limit`, `--env-key`
+- Default `--limit` changed from 10 to 25
+- JSON output uses `click.echo()` instead of `console.print()` to avoid ANSI escape codes
+
+### Removed
+
+- Directory tree feature (`--tree`, `--tree-depth`, `--tree-max-items`)
+- YAML export (`--yaml`)
+- TOML export (`--toml`)
+- PATH filter/exclude options (`--path-filter`, `--path-exclude`)
+- Negative toggle flags (`--no-paths`, `--no-python-path`)
+- Environment variable group presets (`--env-group`)
+
 ## [0.3.0] - 2026-01-25
 
 ### Changed

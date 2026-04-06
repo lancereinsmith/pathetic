@@ -12,7 +12,7 @@ Thank you for your interest in contributing to pathetic-cli! This document provi
 
 2. **Install dependencies**
    ```bash
-   uv pip install -e ".[dev]"
+   uv sync
    ```
 
 3. **Install pre-commit hooks** (optional but recommended)
@@ -41,7 +41,6 @@ Thank you for your interest in contributing to pathetic-cli! This document provi
    ```bash
    uv run ruff check .
    uv run ruff format .
-   uv run mypy pathetic.py
    ```
 
 5. **Commit your changes**

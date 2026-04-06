@@ -4,6 +4,8 @@
 import json
 import os
 import platform
+import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -17,7 +19,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-# Try to import optional dependencies
+# Try to import optional dependencies (tomllib for version reading)
 try:
     import tomllib  # Python 3.11+
 except ImportError:
@@ -26,22 +28,15 @@ except ImportError:
     except ImportError:
         tomllib = None  # type: ignore[assignment]
 
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
-
 
 # Version from pyproject.toml (single source of truth)
 def _get_version() -> str:
     """Read version from pyproject.toml."""
     try:
-        # Try reading from installed package first
         import importlib.metadata
 
         return importlib.metadata.version("pathetic-cli")
     except Exception:
-        # Fallback: read directly from pyproject.toml
         try:
             pyproject_path = Path(__file__).parent / "pyproject.toml"
             if pyproject_path.exists():
@@ -51,19 +46,337 @@ def _get_version() -> str:
                         version: str = str(data.get("project", {}).get("version", ""))
                         return version
                 else:
-                    # Fallback: simple regex if tomllib not available
-                    import re
+                    import re as _re
 
                     content = pyproject_path.read_text()
-                    match = re.search(r'version\s*=\s*"([^"]+)"', content)
+                    match = _re.search(r'version\s*=\s*"([^"]+)"', content)
                     if match:
                         return match.group(1)
         except Exception:
             pass
-    return "0.0.0"  # Last resort fallback
+    return "0.0.0"
 
 
 __version__ = _get_version()
+
+
+# ---------------------------------------------------------------------------
+# Python environment detection (user's active Python, not this tool's)
+# ---------------------------------------------------------------------------
+
+
+def get_user_python() -> dict[str, str]:
+    """Find the user's active Python on PATH, not this tool's isolated env."""
+    tool_prefix = sys.prefix
+    path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+
+    for d in path_dirs:
+        # Skip directories inside this tool's own venv
+        if d.startswith(tool_prefix):
+            continue
+        for name in ("python3", "python"):
+            candidate = os.path.join(d, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                try:
+                    ver = subprocess.check_output(
+                        [candidate, "--version"],
+                        text=True,
+                        timeout=5,
+                        stderr=subprocess.STDOUT,
+                    ).strip()
+                    return {"executable": candidate, "version": ver}
+                except Exception:
+                    continue
+
+    # Fallback: use shutil.which (might find our own)
+    which = shutil.which("python3") or shutil.which("python")
+    if which:
+        try:
+            ver = subprocess.check_output(
+                [which, "--version"], text=True, timeout=5, stderr=subprocess.STDOUT
+            ).strip()
+            return {"executable": which, "version": ver}
+        except Exception:
+            pass
+
+    return {
+        "executable": sys.executable,
+        "version": f"Python {platform.python_version()}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# PATH origin tracing
+# ---------------------------------------------------------------------------
+
+_SHELL_CONFIG_FILES = [
+    "~/.zshenv",
+    "~/.zprofile",
+    "~/.zshrc",
+    "~/.zlogin",
+    "~/.bash_profile",
+    "~/.bashrc",
+    "~/.profile",
+    "/etc/profile",
+    "/etc/zshrc",
+    "/etc/zprofile",
+]
+
+
+def trace_path_sources() -> dict[str, str]:
+    """Map PATH entries to their likely source file.
+
+    Checks /etc/paths, /etc/paths.d/*, and common shell config files
+    for lines that add each path.
+    """
+    sources: dict[str, str] = {}
+
+    # 1. /etc/paths — base system paths (macOS)
+    etc_paths = Path("/etc/paths")
+    if etc_paths.exists():
+        try:
+            for line in etc_paths.read_text().splitlines():
+                line = line.strip()
+                if line:
+                    sources[line] = "/etc/paths"
+        except OSError:
+            pass
+
+    # 2. /etc/paths.d/* — additional system paths (macOS)
+    etc_paths_d = Path("/etc/paths.d")
+    if etc_paths_d.is_dir():
+        try:
+            for f in sorted(etc_paths_d.iterdir()):
+                if f.is_file():
+                    try:
+                        for line in f.read_text().splitlines():
+                            line = line.strip()
+                            if line:
+                                sources[line] = f"/etc/paths.d/{f.name}"
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    # 3. Shell config files — look for PATH modifications
+    path_pattern = re.compile(
+        r"""(?:export\s+)?PATH\s*=|path\s*\+=|PATH\s*:=""",
+        re.IGNORECASE,
+    )
+    home = os.path.expanduser("~")
+
+    # Helper to resolve shell variables in a path string
+    def _expand(p: str) -> str:
+        return (
+            p.replace("$HOME", home)
+            .replace("${HOME}", home)
+            .replace("~", home)
+            .rstrip("/")
+        )
+
+    for config_file in _SHELL_CONFIG_FILES:
+        expanded = os.path.expanduser(config_file)
+        if not os.path.isfile(expanded):
+            continue
+        try:
+            content = Path(expanded).read_text()
+        except OSError:
+            continue
+
+        display_name = config_file if config_file.startswith("~") else config_file
+
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or not stripped:
+                continue
+
+            # Check for well-known eval/source that add paths indirectly
+            if "brew shellenv" in stripped:
+                for hp in ["/opt/homebrew/bin", "/opt/homebrew/sbin"]:
+                    if hp not in sources:
+                        sources[hp] = f"{display_name} (brew)"
+                continue
+            if "orbstack" in stripped.lower() and (
+                "source" in stripped or stripped.startswith(".")
+            ):
+                orbstack_bin = os.path.expanduser("~/.orbstack/bin")
+                if os.path.isdir(orbstack_bin) and orbstack_bin not in sources:
+                    sources[orbstack_bin] = f"{display_name} (orbstack)"
+                continue
+
+            # Follow sourced files that commonly modify PATH (e.g. . "$HOME/.cargo/env")
+            source_match = re.match(
+                r'^(?:source|\.) +["\']?([^\s"\']+)["\']?', stripped
+            )
+            if source_match:
+                sourced_path = _expand(source_match.group(1))
+                if os.path.isfile(sourced_path):
+                    try:
+                        sourced_content = Path(sourced_path).read_text()
+                    except OSError:
+                        continue
+                    # Look for PATH modifications inside the sourced file
+                    for sline in sourced_content.splitlines():
+                        sline = sline.strip()
+                        if sline.startswith("#") or not sline:
+                            continue
+                        if not path_pattern.search(sline):
+                            continue
+                        for m in re.finditer(
+                            r'(?:\$HOME|\$\{HOME\}|~)?(/[^\s:;"\'`]+)', sline
+                        ):
+                            raw = m.group(0)
+                            if raw in ("$PATH", "${PATH}"):
+                                continue
+                            resolved = _expand(raw)
+                            if resolved and resolved not in sources:
+                                # Show as: config_file (sourced_filename)
+                                sourced_name = Path(sourced_path).name
+                                sources[resolved] = f"{display_name} ({sourced_name})"
+                continue
+
+            # Check if this line modifies PATH
+            if not path_pattern.search(stripped):
+                continue
+
+            # Extract path segments from the line.
+            # Match both literal paths (/foo/bar) and variable paths ($HOME/foo, ${HOME}/foo, ~/foo)
+            for match in re.finditer(
+                r'(?:\$HOME|\$\{HOME\}|~)?(/[^\s:;"\'`]+)', stripped
+            ):
+                raw = match.group(0)
+                # Skip $PATH itself (the variable reference, not a real directory)
+                if raw in ("$PATH", "${PATH}"):
+                    continue
+                resolved = _expand(raw)
+                if resolved and resolved not in sources:
+                    sources[resolved] = display_name
+
+    # 4. Well-known runtime sources (not from config files)
+    for p in os.environ.get("PATH", "").split(os.pathsep):
+        if p in sources:
+            continue
+        # Virtual environment activation
+        if "/.venv/" in p or "/venv/" in p:
+            sources[p] = "venv activate"
+        # VS Code injected paths
+        elif "Code/User/globalStorage" in p or "vscode" in p.lower():
+            sources[p] = "VS Code"
+        # iTerm2 utilities
+        elif "iTerm" in p or "iterm" in p.lower():
+            sources[p] = "iTerm.app"
+
+    return sources
+
+
+# ---------------------------------------------------------------------------
+# Environment variable categorization
+# ---------------------------------------------------------------------------
+
+# Exact-match categories
+_ENV_EXACT: dict[str, str] = {
+    "USER": "Shell",
+    "SHELL": "Shell",
+    "TERM": "Shell",
+    "LANG": "Shell",
+    "HOME": "Shell",
+    "LOGNAME": "Shell",
+    "PWD": "Shell",
+    "OLDPWD": "Shell",
+    "TMPDIR": "Shell",
+    "SHLVL": "Shell",
+    "_": "Shell",
+    "EDITOR": "Editor",
+    "VISUAL": "Editor",
+    "GIT_EDITOR": "Editor",
+    "CI": "CI/CD",
+    "VIRTUAL_ENV": "Python",
+    "CONDA_DEFAULT_ENV": "Python",
+}
+
+# Prefix-match categories (checked in order)
+_ENV_PREFIXES: list[tuple[str, str]] = [
+    ("PYTHON", "Python"),
+    ("VIRTUAL_ENV", "Python"),
+    ("CONDA_", "Python"),
+    ("PIP", "Python"),
+    ("UV_", "Python"),
+    ("PIPX_", "Python"),
+    ("PDM_", "Python"),
+    ("POETRY_", "Python"),
+    ("GIT_", "Git"),
+    ("AWS_", "Cloud"),
+    ("GCP_", "Cloud"),
+    ("AZURE_", "Cloud"),
+    ("GOOGLE_", "Cloud"),
+    ("DOCKER_", "Docker"),
+    ("COMPOSE_", "Docker"),
+    ("GITHUB_", "CI/CD"),
+    ("GITLAB_", "CI/CD"),
+    ("BUILDKITE", "CI/CD"),
+    ("CIRCLE", "CI/CD"),
+    ("TRAVIS", "CI/CD"),
+    ("JENKINS_", "CI/CD"),
+    ("NODE_", "Node.js"),
+    ("NPM_", "Node.js"),
+    ("NVM_", "Node.js"),
+    ("YARN_", "Node.js"),
+    ("ZSH_", "Shell"),
+    ("BASH_", "Shell"),
+    ("TERM_", "Shell"),
+    ("LC_", "Shell"),
+    ("XDG_", "Shell"),
+    ("SSH_", "SSH"),
+    ("GPG_", "Security"),
+    ("GNUPG_", "Security"),
+    ("HTTP_PROXY", "Proxy"),
+    ("HTTPS_PROXY", "Proxy"),
+    ("NO_PROXY", "Proxy"),
+    ("HOMEBREW_", "Homebrew"),
+    ("CARGO_", "Rust"),
+    ("RUSTUP_", "Rust"),
+    ("GOPATH", "Go"),
+    ("GOROOT", "Go"),
+    ("JAVA_", "Java"),
+    ("MAVEN_", "Java"),
+    ("GRADLE_", "Java"),
+]
+
+
+def categorize_env_var(key: str) -> str:
+    """Categorize an environment variable by its key."""
+    if key in _ENV_EXACT:
+        return _ENV_EXACT[key]
+
+    key_upper = key.upper()
+    for prefix, category in _ENV_PREFIXES:
+        if key_upper.startswith(prefix) or key.startswith(prefix.lower()):
+            return category
+
+    # Lowercase proxy variants
+    if key in ("http_proxy", "https_proxy", "no_proxy"):
+        return "Proxy"
+
+    return "Other"
+
+
+def get_grouped_env_vars() -> dict[str, dict[str, str]]:
+    """Get all environment variables grouped by category."""
+    groups: dict[str, dict[str, str]] = {}
+    for key, value in sorted(os.environ.items()):
+        # Skip PATH (shown separately) and internal vars
+        if key == "PATH":
+            continue
+        category = categorize_env_var(key)
+        if category not in groups:
+            groups[category] = {}
+        groups[category][key] = value
+    return groups
+
+
+# ---------------------------------------------------------------------------
+# Section renderers
+# ---------------------------------------------------------------------------
 
 
 def render_header(console: Console) -> None:
@@ -72,11 +385,7 @@ def render_header(console: Console) -> None:
 
 
 def section_cwd_home() -> Panel:
-    """Render a panel showing current working directory and home directory.
-
-    Returns:
-        A Rich Panel containing CWD and home directory information.
-    """
+    """Render a panel showing current working directory and home directory."""
     text = Text()
     text.append("📁 CWD: ", style="bold")
     text.append(f"{os.getcwd()}\n", style="green")
@@ -85,49 +394,54 @@ def section_cwd_home() -> Panel:
     return Panel(text, title="Location", border_style="green", padding=(1, 2))
 
 
-def section_system() -> Panel:
-    """Render a panel showing system information.
+def section_system(venv_info: dict[str, str | None] | None = None) -> Panel:
+    """Render a panel showing system info with the user's active Python."""
+    user_py = get_user_python()
 
-    Returns:
-        A Rich Panel containing platform, Python version, architecture, and executable info.
-    """
     info = Text()
     info.append("🖥️ Platform: ", style="bold")
     info.append(f"{platform.system()} {platform.release()}\n", style="cyan")
     info.append("🐍 Python: ", style="bold")
-    info.append(
-        f"{platform.python_version()} ({platform.python_implementation()})\n",
-        style="green",
-    )
+    info.append(f"{user_py['version']}\n", style="green")
     info.append("🏗️ Arch: ", style="bold")
     info.append(f"{platform.machine()}\n", style="blue")
     info.append("📦 Executable: ", style="bold")
-    info.append(f"{sys.executable}", style="magenta")
+    info.append(f"{user_py['executable']}", style="magenta")
+    if venv_info:
+        env_manager = venv_info.get("manager")
+        env_location = venv_info.get("location")
+        if env_manager or env_location:
+            info.append("\n🧪 Environment: ", style="bold")
+            details = (
+                f"{env_manager or 'unknown'} at {env_location}"
+                if env_location
+                else f"{env_manager}"
+            )
+            info.append(details, style="yellow")
     return Panel(info, title="System", border_style="cyan", padding=(1, 2))
 
 
-def section_paths(
-    limit: int = 10,
-    path_filter: str | None = None,
-    path_exclude: str | None = None,
-) -> Panel:
-    """Render a panel showing PATH entries.
+def _count_executables(directory: str) -> int | None:
+    """Count executable files in a directory. Returns None if dir doesn't exist."""
+    if not os.path.isdir(directory):
+        return None
+    count = 0
+    try:
+        for entry in os.scandir(directory):
+            try:
+                if entry.is_file() and os.access(entry.path, os.X_OK):
+                    count += 1
+            except (OSError, PermissionError):
+                continue
+    except (OSError, PermissionError):
+        return None
+    return count
 
-    Args:
-        limit: Maximum number of PATH entries to display.
-        path_filter: Optional filter to include only PATH entries containing this text.
-        path_exclude: Optional filter to exclude PATH entries containing this text.
 
-    Returns:
-        A Rich Panel containing PATH information in a table format.
-    """
+def section_paths(limit: int = 10) -> Panel:
+    """Render a panel showing PATH entries with their source files and contents."""
     parts = os.environ.get("PATH", "").split(os.pathsep)
-
-    # Apply filters
-    if path_filter:
-        parts = [p for p in parts if path_filter.lower() in p.lower()]
-    if path_exclude:
-        parts = [p for p in parts if path_exclude.lower() not in p.lower()]
+    sources = trace_path_sources()
 
     table = Table(
         title=f"PATH (first {min(limit, len(parts))} of {len(parts)})",
@@ -135,24 +449,19 @@ def section_paths(
     )
     table.add_column("#", style="cyan", no_wrap=True)
     table.add_column("Path", style="white")
+    table.add_column("Cmds", style="green", no_wrap=True, justify="right")
+    table.add_column("Source", style="dim", no_wrap=True)
     for i, p in enumerate(parts[:limit], 1):
-        # Highlight filtered entries
-        path_display = p or "[dim]<empty>[/dim]"
-        if path_filter and path_filter.lower() in p.lower():
-            path_display = f"[yellow]{path_display}[/yellow]"
-        table.add_row(str(i), path_display)
+        display = p or "[dim]<empty>[/dim]"
+        source = sources.get(p, sources.get(p.rstrip("/"), ""))
+        count = _count_executables(p) if p else None
+        cmds = "[red]missing[/red]" if count is None else str(count)
+        table.add_row(str(i), display, cmds, source)
     return Panel(table, title="PATH", border_style="yellow", padding=(1, 1))
 
 
 def section_python_path(limit: int = 10) -> Panel:
-    """Render a panel showing Python sys.path entries.
-
-    Args:
-        limit: Maximum number of sys.path entries to display.
-
-    Returns:
-        A Rich Panel containing Python path information in a table format.
-    """
+    """Render a panel showing Python sys.path entries."""
     table = Table(
         title=f"sys.path (first {min(limit, len(sys.path))} of {len(sys.path)})",
         box=box.ROUNDED,
@@ -164,99 +473,90 @@ def section_python_path(limit: int = 10) -> Panel:
     return Panel(table, title="Python Path", border_style="green", padding=(1, 1))
 
 
-ENV_GROUPS: dict[str, list[str]] = {
-    # Common, high-signal variables
-    "common": [
-        "USER",
-        "SHELL",
-        "LANG",
-        "PWD",
-        "HOME",
-        "TMPDIR",
-        "LOGNAME",
-    ],
-    # Python and tooling related
-    "python": [
-        "PYTHONPATH",
-        "VIRTUAL_ENV",
-        "CONDA_PREFIX",
-        "PIPX_HOME",
-        "PIPX_BIN_DIR",
-        "UV_CACHE_DIR",
-        "UV_PYTHON",
-    ],
-    # CI environments
-    "ci": [
-        "CI",
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "BUILDKITE",
-        "CIRCLECI",
-        "APPVEYOR",
-        "TRAVIS",
-    ],
-    # Docker-related
-    "docker": [
-        "DOCKER_HOST",
-        "DOCKER_TLS_VERIFY",
-        "DOCKER_CERT_PATH",
-        "COMPOSE_PROJECT_NAME",
-    ],
-    # Cloud providers
-    "cloud": [
-        "AWS_REGION",
-        "AWS_PROFILE",
-        "GCP_PROJECT",
-        "AZURE_SUBSCRIPTION_ID",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-    ],
-    # Editor-related
-    "editor": [
-        "EDITOR",
-        "VISUAL",
-        "GIT_EDITOR",
-    ],
-    # Proxy settings
-    "proxy": [
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "NO_PROXY",
-        "no_proxy",
-    ],
+# Category display order and colors
+_CATEGORY_STYLES: dict[str, str] = {
+    "Shell": "green",
+    "Python": "yellow",
+    "Git": "magenta",
+    "Editor": "cyan",
+    "Cloud": "blue",
+    "Docker": "cyan",
+    "CI/CD": "red",
+    "Node.js": "green",
+    "SSH": "magenta",
+    "Security": "red",
+    "Proxy": "yellow",
+    "Homebrew": "yellow",
+    "Rust": "red",
+    "Go": "cyan",
+    "Java": "red",
+    "Other": "white",
 }
 
+_CATEGORY_ORDER = [
+    "Shell",
+    "Python",
+    "Git",
+    "Editor",
+    "Cloud",
+    "Docker",
+    "CI/CD",
+    "Node.js",
+    "SSH",
+    "Security",
+    "Proxy",
+    "Homebrew",
+    "Rust",
+    "Go",
+    "Java",
+    "Other",
+]
 
-def section_env(keys: list[str] | None = None) -> Panel:
-    """Render a panel showing selected environment variables.
 
-    Args:
-        keys: List of environment variable keys to display. If None, uses common group.
+def section_env(keys: list[str] | None = None) -> list[Panel]:
+    """Render panels showing environment variables, grouped by category.
 
-    Returns:
-        A Rich Panel containing environment variable information in a table format.
+    If specific keys are provided, shows only those.
+    Otherwise shows all env vars grouped intelligently.
     """
-    table = Table(title="Selected Environment", box=box.ROUNDED)
-    table.add_column("Variable", style="cyan", no_wrap=True)
-    table.add_column("Value", style="white")
-    if not keys:
-        keys = ENV_GROUPS["common"]
-    for k in keys:
-        v = os.environ.get(k, "[dim]Not set[/dim]")
-        sv = str(v)
-        if len(sv) > 80:
-            sv = sv[:77] + "..."
-        table.add_row(k, sv)
-    return Panel(table, title="Environment", border_style="blue", padding=(1, 1))
+    if keys:
+        # Show specific keys in a single table
+        table = Table(title="Selected Environment", box=box.ROUNDED)
+        table.add_column("Variable", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white")
+        for k in keys:
+            v = os.environ.get(k, "[dim]Not set[/dim]")
+            sv = str(v)
+            if len(sv) > 80:
+                sv = sv[:77] + "..."
+            table.add_row(k, sv)
+        return [Panel(table, title="Environment", border_style="blue", padding=(1, 1))]
+
+    # Show all env vars grouped by category
+    groups = get_grouped_env_vars()
+    panels: list[Panel] = []
+
+    for category in _CATEGORY_ORDER:
+        if category not in groups:
+            continue
+        env_vars = groups[category]
+        style = _CATEGORY_STYLES.get(category, "white")
+
+        table = Table(box=box.SIMPLE_HEAVY, show_header=True, padding=(0, 1))
+        table.add_column("Variable", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white", overflow="fold")
+        for k, v in sorted(env_vars.items()):
+            sv = v if len(v) <= 120 else v[:117] + "..."
+            table.add_row(k, sv)
+        panels.append(
+            Panel(table, title=f"Env: {category}", border_style=style, padding=(0, 1))
+        )
+
+    return panels
 
 
 def section_fs() -> Panel:
-    """Render a panel showing filesystem statistics.
-
-    Returns:
-        A Rich Panel containing filesystem usage information, or an error message if unavailable.
-    """
+    """Render a panel showing filesystem statistics."""
     statvfs_fn = getattr(os, "statvfs", None)
     if statvfs_fn is None:
         return Panel("Unavailable", title="File System", border_style="red")
@@ -291,14 +591,7 @@ def section_fs() -> Panel:
 
 
 def get_git_info(timeout: float = 5.0) -> dict[str, Any] | None:
-    """Get git information with timeout and better error handling.
-
-    Args:
-        timeout: Maximum time to wait for git commands in seconds.
-
-    Returns:
-        Dictionary with branch, commit, and changes count, or None if git is unavailable.
-    """
+    """Get git information with timeout and better error handling."""
     try:
         branch = subprocess.check_output(
             ["git", "branch", "--show-current"],
@@ -332,14 +625,7 @@ def get_git_info(timeout: float = 5.0) -> dict[str, Any] | None:
 
 
 def section_git(timeout: float = 5.0) -> Panel | None:
-    """Render a panel showing git repository information.
-
-    Args:
-        timeout: Maximum time to wait for git commands in seconds.
-
-    Returns:
-        A Rich Panel containing git information, or None if not in a git repo or git unavailable.
-    """
+    """Render a panel showing git repository information."""
     git_info = get_git_info(timeout=timeout)
     if git_info is None:
         return None
@@ -358,42 +644,25 @@ def section_git(timeout: float = 5.0) -> Panel | None:
 
 
 def detect_virtual_environment() -> dict[str, str | None]:
-    """Detect and return information about the active Python environment.
-
-    Detects virtualenv/venv, conda, Poetry, Pipenv, PDM, and uv environments.
-
-    Returns:
-        Dictionary containing:
-        - manager: Environment manager name (e.g., "venv", "conda", "poetry")
-        - location: Path to the environment
-        - uv_python: UV_PYTHON value if set
-        - uv_cache: UV_CACHE_DIR value if set
-        - poetry_active: POETRY_ACTIVE value if set
-        - pipenv_active: PIPENV_ACTIVE value if set
-        - pdm_project_root: PDM_PROJECT_ROOT value if set
-    """
-    # Virtualenv/venv
+    """Detect and return information about the active Python environment."""
     virtual_env = os.environ.get("VIRTUAL_ENV")
     conda_prefix = os.environ.get("CONDA_PREFIX")
     poetry_active = os.environ.get("POETRY_ACTIVE")
     pipenv_active = os.environ.get("PIPENV_ACTIVE")
     pdm_project_root = os.environ.get("PDM_PROJECT_ROOT")
 
-    # Heuristic: venv active when sys.prefix differs
     is_venv = False
     try:
         is_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
     except Exception:
         is_venv = False
 
-    # uv-related hints (best-effort; uv does not always export markers)
     uv_python = os.environ.get("UV_PYTHON")
     uv_cache = os.environ.get("UV_CACHE_DIR")
 
     manager: str | None = None
     location: str | None = None
 
-    # Priority order: conda > poetry > pipenv > pdm > venv
     if conda_prefix:
         manager = "conda"
         location = conda_prefix
@@ -410,7 +679,6 @@ def detect_virtual_environment() -> dict[str, str | None]:
         manager = "venv"
         location = virtual_env or sys.prefix
 
-    # Flag uv if we see hints
     if uv_python or uv_cache:
         manager = "uv" if manager is None else f"{manager}+uv"
 
@@ -425,76 +693,9 @@ def detect_virtual_environment() -> dict[str, str | None]:
     }
 
 
-def get_directory_tree_json(
-    path: str | Path,
-    max_depth: int = 2,
-    max_items: int = 10,
-    current_depth: int = 0,
-) -> list[dict[str, Any]]:
-    """Generate a JSON representation of directory tree.
-
-    Args:
-        path: Path to the directory to traverse.
-        max_depth: Maximum depth to traverse.
-        max_items: Maximum items per directory level.
-        current_depth: Current depth in recursion.
-
-    Returns:
-        List of dictionaries representing the directory tree structure.
-    """
-    if current_depth >= max_depth:
-        return [{"type": "ellipsis"}]
-    nodes: list[dict[str, Any]] = []
-    try:
-        items = sorted(Path(path).iterdir(), key=lambda x: (x.is_file(), x.name))
-        for item in items[:max_items]:
-            node: dict[str, Any] = {
-                "name": item.name,
-                "type": "file" if item.is_file() else "dir",
-            }
-            if item.is_dir() and current_depth < max_depth - 1:
-                node["children"] = get_directory_tree_json(
-                    item, max_depth, max_items, current_depth + 1
-                )
-            nodes.append(node)
-    except PermissionError:
-        nodes.append({"type": "permission_denied"})
-    return nodes
-
-
-def get_directory_tree(
-    path: str | Path,
-    max_depth: int = 2,
-    max_items: int = 10,
-    current_depth: int = 0,
-) -> str:
-    """Generate a text representation of directory tree.
-
-    Args:
-        path: Path to the directory to traverse.
-        max_depth: Maximum depth to traverse.
-        max_items: Maximum items per directory level.
-        current_depth: Current depth in recursion.
-
-    Returns:
-        String representation of the directory tree.
-    """
-    if current_depth >= max_depth:
-        return "  " * current_depth + "..."
-    tree: list[str] = []
-    try:
-        items = sorted(Path(path).iterdir(), key=lambda x: (x.is_file(), x.name))
-        for i, item in enumerate(items[:max_items]):
-            is_last = i == len(items) - 1 or i == max_items - 1
-            prefix = "└── " if is_last else "├── "
-            tree.append("  " * current_depth + prefix + item.name)
-            if item.is_dir() and current_depth < max_depth - 1:
-                tree.append(
-                    get_directory_tree(item, max_depth, max_items, current_depth + 1)
-                )
-    except PermissionError:
-        tree.append("  " * current_depth + "└── [Permission Denied]")
-    return "\n".join(tree)
+# ---------------------------------------------------------------------------
+# Config and output builders
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -502,80 +703,62 @@ class Config:
     """Configuration dataclass for CLI options."""
 
     show_all: bool
-    no_paths: bool
-    no_python_path: bool
     show_env: bool
     show_fs: bool
-    show_tree: bool
     limit: int
     as_json: bool
-    as_yaml: bool
-    as_toml: bool
-    env_groups: tuple[str, ...]
     env_keys: tuple[str, ...]
-    path_filter: str | None
-    path_exclude: str | None
-    tree_depth: int
-    tree_max_items: int
 
 
 def build_json_output(config: Config) -> dict[str, Any]:
-    """Build the JSON output structure.
-
-    Args:
-        config: Configuration object with all CLI options.
-
-    Returns:
-        Dictionary ready for JSON serialization.
-    """
+    """Build the JSON output structure."""
     venv_info = detect_virtual_environment()
+    user_py = get_user_python()
     data: dict[str, Any] = {
         "location": {"cwd": os.getcwd(), "home": os.path.expanduser("~")},
         "system": {
             "platform": platform.system(),
             "release": platform.release(),
-            "python_version": platform.python_version(),
-            "python_implementation": platform.python_implementation(),
+            "python_version": user_py["version"],
             "architecture": platform.machine(),
-            "executable": sys.executable,
+            "python_executable": user_py["executable"],
             "environment": venv_info,
         },
     }
 
-    # PATH
+    # PATH with sources
     parts = os.environ.get("PATH", "").split(os.pathsep)
-    if config.path_filter:
-        parts = [p for p in parts if config.path_filter.lower() in p.lower()]
-    if config.path_exclude:
-        parts = [p for p in parts if config.path_exclude.lower() not in p.lower()]
+    sources = trace_path_sources()
+    path_entries = []
+    for p in parts[: config.limit]:
+        entry: dict[str, str] = {"path": p}
+        source = sources.get(p, sources.get(p.rstrip("/"), ""))
+        if source:
+            entry["source"] = source
+        path_entries.append(entry)
     data["path"] = {
-        "entries": parts[: config.limit],
+        "entries": path_entries,
         "total": len(parts),
         "shown": min(config.limit, len(parts)),
     }
 
-    # Python path
-    if config.show_all and not config.no_python_path:
+    # Python path (with --all)
+    if config.show_all:
         data["python_path"] = {
             "entries": sys.path[: config.limit],
             "total": len(sys.path),
             "shown": min(config.limit, len(sys.path)),
         }
 
-    # Env keys selection
-    if config.show_all or config.show_env or config.env_groups or config.env_keys:
-        keys_from_groups: list[str] = []
-        for g in config.env_groups:
-            keys_from_groups.extend(ENV_GROUPS.get(g, []))
-        selected_env_keys = list(
-            dict.fromkeys(
-                (keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"]
-            )
-        )
-        env_map: dict[str, str | None] = {
-            k: os.environ.get(k) for k in selected_env_keys
-        }
-        data["environment"] = env_map
+    # Environment variables
+    if config.show_all or config.show_env or config.env_keys:
+        if config.env_keys:
+            env_map: dict[str, str | None] = {
+                k: os.environ.get(k) for k in config.env_keys
+            }
+            data["environment"] = env_map
+        else:
+            data["environment"] = get_grouped_env_vars()
 
     # File system
     if config.show_all or config.show_fs:
@@ -600,107 +783,71 @@ def build_json_output(config: Config) -> dict[str, Any]:
 
     # Git
     git_info = get_git_info()
-    if git_info:
-        data["git"] = git_info
-    else:
-        data["git"] = None
-
-    # Tree
-    if config.show_all or config.show_tree:
-        data["tree"] = get_directory_tree_json(
-            ".", max_depth=config.tree_depth, max_items=config.tree_max_items
-        )
+    data["git"] = git_info
 
     return data
 
 
-def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel]:
-    """Build the list of panels for text output.
+def render_output(console: Console, config: Config) -> None:
+    """Render panels in a responsive columnar layout based on terminal width."""
+    render_header(console)
+    venv_info = detect_virtual_environment()
+    width = console.width
 
-    Args:
-        config: Configuration object with all CLI options.
-        venv_info: Virtual environment information dictionary.
-
-    Returns:
-        List of Rich Panel objects to display.
-    """
-    panels: list[Panel] = []
-
-    # Always useful
-    panels.append(section_cwd_home())
-
-    # System with environment info
-    sys_info = Text()
-    sys_info.append("🖥️ Platform: ", style="bold")
-    sys_info.append(f"{platform.system()} {platform.release()}\n", style="cyan")
-    sys_info.append("🐍 Python: ", style="bold")
-    sys_info.append(
-        f"{platform.python_version()} ({platform.python_implementation()})\n",
-        style="green",
-    )
-    sys_info.append("🏗️ Arch: ", style="bold")
-    sys_info.append(f"{platform.machine()}\n", style="blue")
-    sys_info.append("📦 Executable: ", style="bold")
-    sys_info.append(f"{sys.executable}\n", style="magenta")
-    # Virtual environment details
-    env_manager = venv_info.get("manager")
-    env_location = venv_info.get("location")
-    if env_manager or env_location:
-        sys_info.append("🧪 Environment: ", style="bold")
-        details = (
-            f"{env_manager or 'unknown'} at {env_location}"
-            if env_location
-            else f"{env_manager}"
-        )
-        sys_info.append(details + "\n", style="yellow")
-    panels.append(Panel(sys_info, title="System", border_style="cyan", padding=(1, 2)))
-
-    # PATH sections
-    if config.show_all or not config.no_paths:
-        panels.append(
-            section_paths(
-                limit=config.limit,
-                path_filter=config.path_filter,
-                path_exclude=config.path_exclude,
-            )
-        )
-    if config.show_all and not config.no_python_path:
-        panels.append(section_python_path(limit=config.limit))
-
-    # Optional sections
-    if config.show_all or config.show_env or config.env_groups or config.env_keys:
-        keys_from_groups: list[str] = []
-        for g in config.env_groups:
-            keys_from_groups.extend(ENV_GROUPS.get(g, []))
-        selected_keys = list(
-            dict.fromkeys(
-                (keys_from_groups + list(config.env_keys)) or ENV_GROUPS["common"]
-            )
-        )
-        panels.append(section_env(keys=selected_keys))
-    if config.show_all or config.show_fs:
-        panels.append(section_fs())
+    # Compact panels: small text-based info that fits side-by-side
+    compact: list[Panel] = [section_cwd_home(), section_system(venv_info)]
     git_panel = section_git()
     if git_panel is not None:
-        panels.append(git_panel)
+        compact.append(git_panel)
+    if config.show_all or config.show_fs:
+        compact.append(section_fs())
 
-    return panels
+    # Determine columns for compact panels based on terminal width
+    if width >= 140:
+        cols = 3
+    elif width >= 90:
+        cols = 2
+    else:
+        cols = 1
+
+    # Lay out compact panels in a grid
+    grid = Table.grid(expand=True)
+    for _ in range(cols):
+        grid.add_column(ratio=1)
+    for i in range(0, len(compact), cols):
+        row = compact[i : i + cols]
+        while len(row) < cols:
+            row.append(Text(""))  # type: ignore[arg-type]
+        grid.add_row(*row)
+    console.print(grid)
+
+    # Wide panels: tables that benefit from full width
+    console.print(section_paths(limit=config.limit))
+    if config.show_all:
+        console.print(section_python_path(limit=config.limit))
+
+    # Environment variables
+    if config.show_all or config.show_env or config.env_keys:
+        keys = list(config.env_keys) if config.env_keys else None
+        env_panels = section_env(keys=keys)
+        for p in env_panels:
+            console.print(p)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="pathetic")
 @click.option("--all", "show_all", is_flag=True, help="Show all sections")
-@click.option("--no-paths", is_flag=True, help="Hide PATH section")
-@click.option("--no-python-path", is_flag=True, help="Hide sys.path section")
-@click.option(
-    "--env", "show_env", is_flag=True, help="Show selected environment variables"
-)
+@click.option("--env", "show_env", is_flag=True, help="Show environment variables")
 @click.option("--fs", "show_fs", is_flag=True, help="Show file system stats")
-@click.option("--tree", "show_tree", is_flag=True, help="Show a small directory tree")
 @click.option(
     "--limit",
     type=int,
-    default=10,
+    default=25,
     show_default=True,
     help="Max rows for PATH and sys.path",
 )
@@ -708,65 +855,18 @@ def build_panels(config: Config, venv_info: dict[str, str | None]) -> list[Panel
     "--json", "as_json", is_flag=True, help="Output as JSON (machine-readable)"
 )
 @click.option(
-    "--yaml", "as_yaml", is_flag=True, help="Output as YAML (requires pyyaml)"
-)
-@click.option("--toml", "as_toml", is_flag=True, help="Output as TOML (requires tomli)")
-@click.option(
-    "--env-group",
-    "env_groups",
-    multiple=True,
-    type=click.Choice(sorted(ENV_GROUPS.keys())),
-    help="Predefined env var groups (repeatable)",
-)
-@click.option(
     "--env-key",
     "env_keys",
     multiple=True,
-    help="Additional environment variable keys (repeatable)",
-)
-@click.option(
-    "--path-filter",
-    "path_filter",
-    type=str,
-    help="Filter PATH entries containing this text (case-insensitive)",
-)
-@click.option(
-    "--path-exclude",
-    "path_exclude",
-    type=str,
-    help="Exclude PATH entries containing this text (case-insensitive)",
-)
-@click.option(
-    "--tree-depth",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Maximum depth for directory tree",
-)
-@click.option(
-    "--tree-max-items",
-    type=int,
-    default=10,
-    show_default=True,
-    help="Maximum items per directory level in tree",
+    help="Show specific env vars (repeatable)",
 )
 def main(
     show_all: bool,
-    no_paths: bool,
-    no_python_path: bool,
     show_env: bool,
     show_fs: bool,
-    show_tree: bool,
     limit: int,
     as_json: bool,
-    as_yaml: bool,
-    as_toml: bool,
-    env_groups: tuple[str, ...],
     env_keys: tuple[str, ...],
-    path_filter: str | None,
-    path_exclude: str | None,
-    tree_depth: int,
-    tree_max_items: int,
 ) -> None:
     """Display useful system and Python environment info.
 
@@ -775,87 +875,21 @@ def main(
     """
     console = Console()
 
-    # Validate export format options
-    export_formats = sum([as_json, as_yaml, as_toml])
-    if export_formats > 1:
-        console.print(
-            "[red]Error: Only one export format can be specified at a time[/red]"
-        )
-        sys.exit(1)
-
-    if as_yaml and yaml is None:
-        console.print(
-            "[red]Error: YAML export requires pyyaml. Install with: uv pip install pyyaml[/red]"
-        )
-        sys.exit(1)
-
-    if as_toml and tomllib is None:
-        console.print(
-            "[red]Error: TOML export requires tomli. Install with: uv pip install tomli[/red]"
-        )
-        sys.exit(1)
-
     config = Config(
         show_all=show_all,
-        no_paths=no_paths,
-        no_python_path=no_python_path,
         show_env=show_env,
         show_fs=show_fs,
-        show_tree=show_tree,
         limit=limit,
         as_json=as_json,
-        as_yaml=as_yaml,
-        as_toml=as_toml,
-        env_groups=env_groups,
         env_keys=env_keys,
-        path_filter=path_filter,
-        path_exclude=path_exclude,
-        tree_depth=tree_depth,
-        tree_max_items=tree_max_items,
     )
 
-    # Handle export formats
-    if as_json or as_yaml or as_toml:
+    if as_json:
         data = build_json_output(config)
-        if as_json:
-            console.print(json.dumps(data, indent=2))
-        elif as_yaml:
-            console.print(yaml.dump(data, default_flow_style=False, sort_keys=False))
-        elif as_toml:
-            # TOML export - note: complex nested structures may not convert perfectly
-            try:
-                import tomli_w
-
-                console.print(tomli_w.dumps(data))
-            except ImportError:
-                console.print(
-                    "[red]Error: TOML export requires tomli-w. Install with: uv pip install tomli-w[/red]"
-                )
-                sys.exit(1)
+        click.echo(json.dumps(data, indent=2))
         return
 
-    # Text output
-    render_header(console)
-    venv_info = detect_virtual_environment()
-    panels = build_panels(config, venv_info)
-
-    for p in panels:
-        console.print(p)
-
-    # Optional small tree at the end
-    if show_all or show_tree:
-        tree_text = (
-            f"[bold]Directory Tree (max depth {tree_depth}):[/bold]\n"
-            f"[dim]{get_directory_tree('.', max_depth=tree_depth, max_items=tree_max_items)}[/dim]"
-        )
-        console.print(
-            Panel(
-                tree_text,
-                title="Current Directory Structure",
-                border_style="yellow",
-                padding=(1, 2),
-            )
-        )
+    render_output(console, config)
 
 
 if __name__ == "__main__":

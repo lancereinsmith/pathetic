@@ -9,7 +9,7 @@ only-include = ["pathetic.py"]
 # ——— Project ———
 [project]
 name = "pathetic-cli"
-version = "0.3.0"
+version = "0.3.1"
 description = "A colorful CLI that visualizes system, environment, and PATH info with Rich."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -36,7 +36,6 @@ class TestCLI:
         result = runner.invoke(pathetic.main, ["--all"])
         assert result.exit_code == 0
         assert "PATH" in result.output
-        assert "Environment" in result.output
 
     def test_json_output(self):
         """Test JSON output format."""
@@ -48,32 +47,6 @@ class TestCLI:
         assert "system" in data
         assert "path" in data
 
-    def test_path_filter(self):
-        """Test PATH filtering."""
-        runner = CliRunner()
-        result = runner.invoke(pathetic.main, ["--path-filter", "bin"])
-        assert result.exit_code == 0
-
-    def test_path_exclude(self):
-        """Test PATH exclusion."""
-        runner = CliRunner()
-        result = runner.invoke(pathetic.main, ["--path-exclude", "usr"])
-        assert result.exit_code == 0
-
-    def test_tree_options(self):
-        """Test tree depth and max-items options."""
-        runner = CliRunner()
-        result = runner.invoke(
-            pathetic.main, ["--tree", "--tree-depth", "1", "--tree-max-items", "5"]
-        )
-        assert result.exit_code == 0
-
-    def test_env_groups(self):
-        """Test environment variable groups."""
-        runner = CliRunner()
-        result = runner.invoke(pathetic.main, ["--env-group", "common"])
-        assert result.exit_code == 0
-
     def test_env_keys(self):
         """Test custom environment variable keys."""
         runner = CliRunner()
@@ -82,19 +55,18 @@ class TestCLI:
         )
         assert result.exit_code == 0
 
-    def test_no_paths_flag(self):
-        """Test --no-paths flag."""
-        runner = CliRunner()
-        result = runner.invoke(pathetic.main, ["--no-paths"])
-        assert result.exit_code == 0
-        # PATH section should not appear in default output when --no-paths is used
-        # But it might still appear if --all is not used, so we just check it doesn't error
-
     def test_limit_option(self):
         """Test --limit option."""
         runner = CliRunner()
         result = runner.invoke(pathetic.main, ["--limit", "5"])
         assert result.exit_code == 0
+
+    def test_env_flag(self):
+        """Test --env flag shows grouped environment variables."""
+        runner = CliRunner()
+        result = runner.invoke(pathetic.main, ["--env"])
+        assert result.exit_code == 0
+        assert "Env:" in result.output
 
 
 class TestSections:
@@ -113,20 +85,10 @@ class TestSections:
         assert panel.title == "System"
 
     def test_section_paths(self, mock_env):
-        """Test PATH section."""
+        """Test PATH section with source column."""
         panel = pathetic.section_paths(limit=5)
         assert panel is not None
         assert panel.title == "PATH"
-
-    def test_section_paths_with_filter(self, mock_env):
-        """Test PATH section with filter."""
-        panel = pathetic.section_paths(limit=5, path_filter="bin")
-        assert panel is not None
-
-    def test_section_paths_with_exclude(self, mock_env):
-        """Test PATH section with exclude."""
-        panel = pathetic.section_paths(limit=5, path_exclude="usr")
-        assert panel is not None
 
     def test_section_python_path(self):
         """Test Python path section."""
@@ -134,16 +96,22 @@ class TestSections:
         assert panel is not None
         assert panel.title == "Python Path"
 
-    def test_section_env(self, mock_env):
-        """Test environment section."""
-        panel = pathetic.section_env()
-        assert panel is not None
-        assert panel.title == "Environment"
+    def test_section_env_grouped(self):
+        """Test grouped environment variable display."""
+        panels = pathetic.section_env()
+        assert isinstance(panels, list)
+        assert len(panels) > 0
+        # Each panel should have a title starting with "Env:"
+        for panel in panels:
+            assert panel.title is not None
+            assert panel.title.startswith("Env:")
 
-    def test_section_env_custom_keys(self, mock_env):
-        """Test environment section with custom keys."""
-        panel = pathetic.section_env(keys=["HOME", "USER"])
-        assert panel is not None
+    def test_section_env_specific_keys(self, mock_env):
+        """Test environment section with specific keys."""
+        panels = pathetic.section_env(keys=["HOME", "USER"])
+        assert isinstance(panels, list)
+        assert len(panels) == 1
+        assert panels[0].title == "Environment"
 
     def test_section_fs(self):
         """Test filesystem section."""
@@ -155,8 +123,6 @@ class TestSections:
     def test_section_git_no_repo(self, mock_git_info):
         """Test git section when not in a git repo."""
         panel = pathetic.section_git()
-        # Should return None if not in git repo
-        # This is expected behavior
         assert panel is None
         mock_git_info.assert_called_once()
 
@@ -167,22 +133,80 @@ class TestSections:
         assert panel.title == "Git"
 
 
+class TestPathSources:
+    """Test PATH origin tracing."""
+
+    def test_trace_path_sources(self):
+        """Test that trace_path_sources returns a dict."""
+        sources = pathetic.trace_path_sources()
+        assert isinstance(sources, dict)
+        # On macOS, /usr/bin should be traced to /etc/paths
+        if os.path.exists("/etc/paths"):
+            assert any("/usr" in k for k in sources)
+
+    def test_path_panel_has_source_column(self, mock_env):
+        """Test that PATH panel includes a Source column."""
+        panel = pathetic.section_paths(limit=5)
+        # The panel should render without error
+        assert panel is not None
+
+
+class TestUserPython:
+    """Test user Python detection."""
+
+    def test_get_user_python(self):
+        """Test that get_user_python returns valid info."""
+        result = pathetic.get_user_python()
+        assert "executable" in result
+        assert "version" in result
+        assert "Python" in result["version"] or "python" in result["version"].lower()
+
+
+class TestEnvCategorization:
+    """Test environment variable categorization."""
+
+    def test_categorize_shell_vars(self):
+        """Test shell variable categorization."""
+        assert pathetic.categorize_env_var("USER") == "Shell"
+        assert pathetic.categorize_env_var("SHELL") == "Shell"
+        assert pathetic.categorize_env_var("HOME") == "Shell"
+
+    def test_categorize_python_vars(self):
+        """Test Python variable categorization."""
+        assert pathetic.categorize_env_var("VIRTUAL_ENV") == "Python"
+        assert pathetic.categorize_env_var("PYTHONPATH") == "Python"
+        assert pathetic.categorize_env_var("UV_CACHE_DIR") == "Python"
+
+    def test_categorize_git_vars(self):
+        """Test Git variable categorization."""
+        assert pathetic.categorize_env_var("GIT_AUTHOR_NAME") == "Git"
+
+    def test_categorize_unknown_vars(self):
+        """Test unknown variable falls to Other."""
+        assert pathetic.categorize_env_var("MY_CUSTOM_VAR") == "Other"
+
+    def test_get_grouped_env_vars(self):
+        """Test that grouped env vars returns non-empty dict."""
+        groups = pathetic.get_grouped_env_vars()
+        assert isinstance(groups, dict)
+        assert len(groups) > 0
+        # Shell group should exist since USER/HOME are always set
+        assert "Shell" in groups
+
+
 class TestEnvironmentDetection:
     """Test virtual environment detection."""
 
     def test_detect_virtual_environment_no_venv(self, monkeypatch):
         """Test detection when no virtual environment is active."""
-        # Clear relevant env vars
         for key in ["VIRTUAL_ENV", "CONDA_PREFIX", "POETRY_ACTIVE", "PIPENV_ACTIVE"]:
             monkeypatch.delenv(key, raising=False)
-
         result = pathetic.detect_virtual_environment()
         assert "manager" in result
         assert "location" in result
 
     def test_detect_virtual_environment_venv(self, monkeypatch):
         """Test detection of venv."""
-        # Clear UV vars to test venv in isolation
         monkeypatch.delenv("UV_PYTHON", raising=False)
         monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("VIRTUAL_ENV", "/path/to/venv")
@@ -192,7 +216,6 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_conda(self, monkeypatch):
         """Test detection of conda."""
-        # Clear UV vars to test conda in isolation
         monkeypatch.delenv("UV_PYTHON", raising=False)
         monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("CONDA_PREFIX", "/path/to/conda")
@@ -202,7 +225,6 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_poetry(self, monkeypatch):
         """Test detection of Poetry."""
-        # Clear UV vars to test poetry in isolation
         monkeypatch.delenv("UV_PYTHON", raising=False)
         monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("POETRY_ACTIVE", "1")
@@ -212,7 +234,6 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_pipenv(self, monkeypatch):
         """Test detection of Pipenv."""
-        # Clear UV vars to test pipenv in isolation
         monkeypatch.delenv("UV_PYTHON", raising=False)
         monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("PIPENV_ACTIVE", "1")
@@ -221,7 +242,6 @@ class TestEnvironmentDetection:
 
     def test_detect_virtual_environment_pdm(self, monkeypatch):
         """Test detection of PDM."""
-        # Clear UV vars to test pdm in isolation
         monkeypatch.delenv("UV_PYTHON", raising=False)
         monkeypatch.delenv("UV_CACHE_DIR", raising=False)
         monkeypatch.setenv("PDM_PROJECT_ROOT", "/path/to/pdm")
@@ -240,7 +260,6 @@ class TestPathSeparator:
 
     def test_path_separator_unix(self, monkeypatch):
         """Test PATH splitting on Unix-like systems."""
-        # Mock os.pathsep to be ':' for Unix-like behavior
         monkeypatch.setattr(os, "pathsep", ":")
         monkeypatch.setenv("PATH", "/usr/bin:/usr/local/bin:/home/user/bin")
         parts = os.environ.get("PATH", "").split(os.pathsep)
@@ -249,41 +268,12 @@ class TestPathSeparator:
 
     def test_path_separator_windows(self, monkeypatch):
         """Test PATH splitting on Windows."""
-        # Mock os.pathsep to be ';' for Windows behavior
         monkeypatch.setattr(os, "pathsep", ";")
-        # Simulate Windows PATH
         windows_path = "C:\\Windows\\System32;C:\\Windows;C:\\Program Files"
         monkeypatch.setenv("PATH", windows_path)
         parts = os.environ.get("PATH", "").split(os.pathsep)
         assert len(parts) == 3
         assert "C:\\Windows\\System32" in parts
-
-
-class TestDirectoryTree:
-    """Test directory tree generation."""
-
-    def test_get_directory_tree_json(self, tmp_path):
-        """Test JSON directory tree generation."""
-        # Create test directory structure
-        (tmp_path / "file1.txt").touch()
-        (tmp_path / "dir1").mkdir()
-        (tmp_path / "dir1" / "file2.txt").touch()
-
-        tree = pathetic.get_directory_tree_json(
-            str(tmp_path), max_depth=2, max_items=10
-        )
-        assert isinstance(tree, list)
-        assert len(tree) > 0
-
-    def test_get_directory_tree_text(self, tmp_path):
-        """Test text directory tree generation."""
-        # Create test directory structure
-        (tmp_path / "file1.txt").touch()
-        (tmp_path / "dir1").mkdir()
-
-        tree = pathetic.get_directory_tree(str(tmp_path), max_depth=1, max_items=5)
-        assert isinstance(tree, str)
-        assert "file1.txt" in tree or "dir1" in tree
 
 
 class TestGitInfo:
@@ -313,24 +303,13 @@ class TestConfig:
 
         config = Config(
             show_all=False,
-            no_paths=False,
-            no_python_path=False,
             show_env=False,
             show_fs=False,
-            show_tree=False,
             limit=10,
             as_json=False,
-            as_yaml=False,
-            as_toml=False,
-            env_groups=(),
             env_keys=(),
-            path_filter=None,
-            path_exclude=None,
-            tree_depth=2,
-            tree_max_items=10,
         )
         assert config.limit == 10
-        assert config.tree_depth == 2
 
 
 class TestJSONOutput:
@@ -342,21 +321,11 @@ class TestJSONOutput:
 
         config = Config(
             show_all=True,
-            no_paths=False,
-            no_python_path=False,
             show_env=True,
             show_fs=True,
-            show_tree=False,
             limit=10,
             as_json=True,
-            as_yaml=False,
-            as_toml=False,
-            env_groups=(),
             env_keys=(),
-            path_filter=None,
-            path_exclude=None,
-            tree_depth=2,
-            tree_max_items=10,
         )
 
         data = build_json_output(config)
@@ -364,3 +333,6 @@ class TestJSONOutput:
         assert "system" in data
         assert "path" in data
         assert isinstance(data["path"]["entries"], list)
+        # Path entries should have source info
+        if data["path"]["entries"]:
+            assert "path" in data["path"]["entries"][0]

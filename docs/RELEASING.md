@@ -2,27 +2,6 @@
 
 This document covers how to publish a new release to PyPI and GitHub.
 
-## Prerequisites
-
-### One-time: Configure PyPI Trusted Publisher
-
-The release workflow uses [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (OIDC) instead of API tokens. This is the recommended approach — no secrets to manage or rotate.
-
-1. Go to <https://pypi.org/manage/project/pathetic-cli/settings/publishing/>
-2. Click **Add a new publisher**
-3. Fill in:
-   - **Owner**: `lancereinsmith`
-   - **Repository name**: `pathetic`
-   - **Workflow name**: `release.yml`
-   - **Environment name**: `pypi`
-4. Click **Add**
-
-### One-time: Create GitHub Environment
-
-1. Go to your repo **Settings > Environments**
-2. Create an environment named `pypi`
-3. Optionally add protection rules (e.g., require approval before publishing)
-
 ## How to Release
 
 ### Option A: Tag push (recommended)

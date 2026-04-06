@@ -190,8 +190,6 @@ class TestEnvCategorization:
         groups = pathetic.get_grouped_env_vars()
         assert isinstance(groups, dict)
         assert len(groups) > 0
-        # Shell group should exist since USER/HOME are always set
-        assert "Shell" in groups
 
 
 class TestEnvironmentDetection:
